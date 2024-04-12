@@ -1,109 +1,147 @@
 #include <Arduino.h>
-#include <Esp32McpwmMotor.h>
-#include <Arduino.h>
-#include <micro_ros_platformio.h>
-#include <WiFi.h>
-#include <rcl/rcl.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
-#include <geometry_msgs/msg/twist.h>
+#include <micro_ros_platformio.h>    // 包含用于 ESP32 的 micro-ROS PlatformIO 库
+#include <WiFi.h>                    // 包含 ESP32 的 WiFi 库
+#include <rcl/rcl.h>                 // 包含 ROS 客户端库 (RCL)
+#include <rclc/rclc.h>               // 包含用于 C 的 ROS 客户端库 (RCLC)
+#include <rclc/executor.h>           // 包含 RCLC 执行程序库，用于执行订阅和发布
+#include <geometry_msgs/msg/twist.h> // 包含 ROS2 geometry_msgs/Twist 消息类型
+#include <Esp32PcntEncoder.h>        // 包含用于计数电机编码器脉冲的 ESP32 PCNT 编码器库
+#include <Esp32McpwmMotor.h>         // 包含使用 ESP32 的 MCPWM 硬件模块控制 DC 电机的 ESP32 MCPWM 电机库
+#include <PidController.h>           // 包含 PID 控制器库，用于实现 PID 控制
 
-// 定义 ROS2 执行器和支持结构
-rclc_executor_t executor;
-rclc_support_t support;
-// 定义 ROS2 内存分配器
-rcl_allocator_t allocator;
-// 定义 ROS2 节点和订阅者
-rcl_node_t node;
-rcl_subscription_t subscriber;
-// 定义接收到的消息结构体
-geometry_msgs__msg__Twist sub_msg;
+Esp32PcntEncoder encoders[2];      // 创建一个长度为 2 的 ESP32 PCNT 编码器数组
+rclc_executor_t executor;          // 创建一个 RCLC 执行程序对象，用于处理订阅和发布
+rclc_support_t support;            // 创建一个 RCLC 支持对象，用于管理 ROS2 上下文和节点
+rcl_allocator_t allocator;         // 创建一个 RCL 分配器对象，用于分配内存
+rcl_node_t node;                   // 创建一个 RCL 节点对象，用于此基于 ESP32 的机器人小车
+rcl_subscription_t subscriber;     // 创建一个 RCL 订阅对象，用于订阅 ROS2 消息
+geometry_msgs__msg__Twist sub_msg; // 创建一个 ROS2 geometry_msgs/Twist 消息对象
+Esp32McpwmMotor motor;             // 创建一个 ESP32 MCPWM 电机对象，用于控制 DC 电机
+float out_motor_speed[2];          // 创建一个长度为 2 的浮点数数组，用于保存输出电机速度
+float current_speeds[2];           // 创建一个长度为 2 的浮点数数组，用于保存当前电机速度
+PidController pid_controller[2];   // 创建PidController的两个对象
 
-// 定义控制两个电机的对象
-Esp32McpwmMotor motor;
-
-#define MOTOR_SPEED 50
-// 回调函数，当接收到新的 Twist 消息时会被调用
 void twist_callback(const void *msg_in)
 {
-    // 将接收到的消息指针转化为 geometry_msgs__msg__Twist 类型
     const geometry_msgs__msg__Twist *twist_msg = (const geometry_msgs__msg__Twist *)msg_in;
-    // 从 Twist 消息中获取线速度和角速度
-    float linear_x = twist_msg->linear.x;
-    float angular_z = twist_msg->angular.z;
-    // 打印接收到的速度信息
-    Serial.printf("recv speed(%f,%f)\n", linear_x, angular_z);
-    // 如果速度为零，则停止两个电机
-    if (linear_x == 0 && angular_z == 0)
+    float linear_x = twist_msg->linear.x;   // 获取 Twist 消息的线性 x 分量
+    float angular_z = twist_msg->angular.z; // 获取 Twist 消息的角度 z 分量
+    Serial.printf("linear_x: %f, angular_z: %f\n", linear_x, angular_z);
+    if (linear_x == 0 && angular_z == 0) // 如果 Twist 消息没有速度命令
     {
-        motor.updateMotorSpeed(0, 0);
-        motor.updateMotorSpeed(1, 0);
-        return;
+        pid_controller[0].update_target(0); // 更新控制器的目标值
+        pid_controller[1].update_target(0);
+        motor.updateMotorSpeed(0, 0); // 停止第一个电机
+        motor.updateMotorSpeed(1, 0); // 停止第二个电机
+        return;                       // 退出函数
     }
 
     // 根据线速度和角速度控制两个电机的转速
-    if (linear_x > 0)
+    if (linear_x != 0)
     {
-        // 前进
-        motor.updateMotorSpeed(0, -MOTOR_SPEED);
-        motor.updateMotorSpeed(1, MOTOR_SPEED);
+        pid_controller[0].update_target(-linear_x * 1000); // 使用mm/s作为target
+        pid_controller[1].update_target(linear_x * 1000);
     }
-
-    if (linear_x < 0)
+    if (angular_z != 0)
     {
-        motor.updateMotorSpeed(0, MOTOR_SPEED);
-        motor.updateMotorSpeed(1, -MOTOR_SPEED);
-    }
-
-    if (angular_z > 0)
-    {
-        motor.updateMotorSpeed(0, -MOTOR_SPEED);
-        motor.updateMotorSpeed(1, -MOTOR_SPEED);
-    }
-
-    if (angular_z < 0)
-    {
-        motor.updateMotorSpeed(0, MOTOR_SPEED);
-        motor.updateMotorSpeed(1, MOTOR_SPEED);
+        pid_controller[0].update_target(0.1 * 1000 * (angular_z > 0 ? -1 : 1)); // 使用mm/s作为target
+        pid_controller[1].update_target(0.1 * 1000 * (angular_z > 0 ? -1 : 1));
     }
 }
-void motorSetup()
-{
-    motor.attachMotor(0, 2, 4);  // 将电机0连接到引脚23和引脚22
-    motor.attachMotor(1, 18, 19); // 将电机1连接到引脚12和引脚13
-}
-void ros2Setup()
-{
 
-    // 设置 micro-ROS 通信参数，连接到指定的 ROS2 代理
+// 这个函数是一个后台任务，负责设置和处理与 micro-ROS 代理的通信。
+void microros_task(void *param)
+{
+    // 设置 micro-ROS 代理的 IP 地址。
     IPAddress agent_ip;
     agent_ip.fromString("192.168.1.30");
+
+    // 使用 WiFi 网络和代理 IP 设置 micro-ROS 传输层。
     set_microros_wifi_transports("00V4", "z12345678", agent_ip, 8888);
+
+    // 等待 2 秒，以便网络连接得到建立。
     delay(2000);
 
-    // 初始化 ROS2 执行器和支持结构
+    // 设置 micro-ROS 支持结构、节点和订阅。
     allocator = rcl_get_default_allocator();
     rclc_support_init(&support, 0, NULL, &allocator);
-    // 初始化 ROS2 节点
     rclc_node_init_default(&node, "esp32_car", "", &support);
-    // 初始化订阅者
     rclc_subscription_init_default(
         &subscriber,
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         "/cmd_vel");
+
+    // 设置 micro-ROS 执行器，并将订阅添加到其中。
     rclc_executor_init(&executor, &support.context, 1, &allocator);
-    // 设置订阅的回调函数
     rclc_executor_add_subscription(&executor, &subscriber, &sub_msg, &twist_callback, ON_NEW_DATA);
+
+    // 循环运行 micro-ROS 执行器以处理传入的消息。
+    while (true)
+    {
+        delay(100);
+        rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
+    }
 }
+
+// 这个函数根据编码器读数更新两个轮子速度。
+void update_speed()
+{
+    // 初始化静态变量以存储上一次更新时间和编码器读数。
+    static uint64_t last_update_time = millis();
+    static int64_t last_ticks[2];
+
+    // 获取自上次更新以来的经过时间。
+    uint64_t dt = millis() - last_update_time;
+    if (dt == 0)
+        return;
+
+    // 获取当前的编码器读数并计算当前的速度。
+    int32_t pt[2];
+    pt[0] = encoders[0].getTicks() - last_ticks[0];
+    pt[1] = encoders[1].getTicks() - last_ticks[1];
+    current_speeds[0] = float(pt[0] * 0.13084936) / dt * 1000;
+    current_speeds[1] = float(pt[1] * 0.13084936) / dt * 1000;
+
+    // 更新上一次更新时间和编码器读数。
+    last_update_time = millis();
+    last_ticks[0] = encoders[0].getTicks();
+    last_ticks[1] = encoders[1].getTicks();
+}
+
 void setup()
 {
-    Serial.begin(115200); // 初始化串口通信，波特率为115200
-    motorSetup();
-    ros2Setup();
+    // 初始化串口通信，波特率为115200
+    Serial.begin(115200);
+    // 将两个电机分别连接到引脚22、23和12、13上
+    // motor.attachMotor(0, 22, 23);
+    // motor.attachMotor(1, 12, 13);
+    motor.attachMotor(0, 2, 4);  // 将电机0连接到引脚4和引脚2
+    motor.attachMotor(1, 18, 19); // 将电机1连接到引脚18和引脚19
+    // 在引脚32、33和26、25上初始化两个编码器
+    encoders[0].init(0, 32, 33);
+    encoders[1].init(1, 26, 25);
+    // 初始化PID控制器的kp、ki和kd
+    pid_controller[0].update_pid(0.625, 0.125, 0.0);
+    pid_controller[1].update_pid(0.625, 0.125, 0.0);
+    // 初始化PID控制器的最大输入输出，MPCNT大小范围在正负100之间
+    pid_controller[0].out_limit(-100, 100);
+    pid_controller[1].out_limit(-100, 100);
+
+    // 在核心0上创建一个名为"microros_task"的任务，栈大小为10240
+    xTaskCreatePinnedToCore(microros_task, "microros_task", 10240, NULL, 1, NULL, 0);
 }
 
 void loop()
 {
-    rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100)); // 循环处理数据
+    // 更新电机速度
+    update_speed();
+    // 计算最新的电机输出值
+    out_motor_speed[0] = pid_controller[0].update(current_speeds[0]);
+    out_motor_speed[1] = pid_controller[1].update(current_speeds[1]);
+    // 更新电机0和电机1的速度值
+    motor.updateMotorSpeed(0, out_motor_speed[0]);
+    motor.updateMotorSpeed(1, out_motor_speed[1]);
+    // 延迟10毫秒
+    delay(10);
 }
