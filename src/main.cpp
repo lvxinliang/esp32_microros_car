@@ -39,8 +39,8 @@ void twist_callback(const void *msg_in)
     // 根据线速度和角速度控制两个电机的转速
     if (linear_x != 0)
     {
-        pid_controller[0].update_target(-linear_x * 1000); // 使用mm/s作为target
-        pid_controller[1].update_target(linear_x * 1000);
+        pid_controller[0].update_target(linear_x * 1000); // 使用mm/s作为target
+        pid_controller[1].update_target(-linear_x * 1000);
     }
     if (angular_z != 0)
     {
@@ -122,11 +122,11 @@ void setup()
     encoders[0].init(0, 32, 33);
     encoders[1].init(1, 26, 25);
     // 初始化PID控制器的kp、ki和kd
-    pid_controller[0].update_pid(0.625, 0.125, 0.0);
-    pid_controller[1].update_pid(0.625, 0.125, 0.0);
+    pid_controller[0].update_pid(0.825, 0.125, 0.0);
+    pid_controller[1].update_pid(0.825, 0.125, 0.0);
     // 初始化PID控制器的最大输入输出，MPCNT大小范围在正负100之间
-    pid_controller[0].out_limit(-100, 100);
-    pid_controller[1].out_limit(-100, 100);
+    pid_controller[0].out_limit(-200, 200);
+    pid_controller[1].out_limit(-200, 200);
 
     // 在核心0上创建一个名为"microros_task"的任务，栈大小为10240
     xTaskCreatePinnedToCore(microros_task, "microros_task", 10240, NULL, 1, NULL, 0);
