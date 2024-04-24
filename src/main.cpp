@@ -87,9 +87,9 @@ void setup()
     pid_controller[1].out_limit(-200, 200);
 
     // 设置运动学参数
-    kinematics.set_motor_param(0, 45, 44, 65);
-    kinematics.set_motor_param(1, 45, 44, 65);
-    kinematics.set_kinematic_param(150);
+    kinematics.set_motor_param(0, 30, 52, 65); // 15606/10/30 = 52
+    kinematics.set_motor_param(1, 30, 52, 65);
+    kinematics.set_kinematic_param(160);
 
     // 在核心0上创建一个名为"microros_task"的任务，栈大小为10240
     xTaskCreatePinnedToCore(microros_task, "microros_task", 10240, NULL, 1, NULL, 0);
