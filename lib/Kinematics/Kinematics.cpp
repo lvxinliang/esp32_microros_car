@@ -34,11 +34,18 @@ void Kinematics::update_motor_ticks(uint64_t current_time, int32_t motor_tick1, 
 
 void Kinematics::kinematic_inverse(float linear_speed, float angular_speed, float &out_wheel1_speed, float &out_wheel2_speed)
 {
+    float linear_speed1 = -linear_speed;
+    float angular_speed2 = -angular_speed;
+    out_wheel1_speed =
+        linear_speed1 - (angular_speed * wheel_distance_) / 2.0;
+    out_wheel2_speed =
+        linear_speed + (angular_speed2 * wheel_distance_) / 2.0;
 }
 
 void Kinematics::kinematic_forward(float wheel1_speed, float wheel2_speed, float &linear_speed, float &angular_speed)
 {
-    linear_speed = (wheel1_speed + wheel2_speed) / 2.0;   // 计算线速度
+    wheel1_speed = -wheel1_speed;
+    linear_speed = (wheel1_speed + wheel2_speed) / 2.0;                // 计算线速度
     angular_speed = (wheel2_speed - wheel1_speed) / wheel_distance_;   // 计算角速度
 }
 
