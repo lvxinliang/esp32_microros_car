@@ -44,8 +44,8 @@ void twist_callback(const void *msg_in)
     }
     if (angular_z != 0)
     {
-        pid_controller[0].update_target(0.1 * 1000 * (angular_z > 0 ? -1 : 1)); // 使用mm/s作为target
-        pid_controller[1].update_target(0.1 * 1000 * (angular_z > 0 ? -1 : 1));
+        pid_controller[0].update_target(0.05 * 1000 * (angular_z > 0 ? -1 : 1)); // 使用mm/s作为target
+        pid_controller[1].update_target(0.05 * 1000 * (angular_z > 0 ? -1 : 1));
     }
 }
 
