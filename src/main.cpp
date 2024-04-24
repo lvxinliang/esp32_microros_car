@@ -24,6 +24,8 @@ PidController pid_controller[2]; // 创建PidController的两个对象
 Kinematics kinematics;           // 运动学相关对象
 
 float last_motor_speed[2] = {0, 0};// 方便调试，保存上一次的电机速度
+unsigned long previousMillis = 0;  // 保存上一次打印的时间
+const long interval = 1000;        // 打印间隔时间
 
 void twist_callback(const void *msg_in)
 {
@@ -105,14 +107,24 @@ void loop()
     kinematics.update_motor_ticks(micros(), encoders[0].getTicks(), encoders[1].getTicks());
     out_motor_speed[0] = pid_controller[0].update(kinematics.motor_speed(0));
     out_motor_speed[1] = pid_controller[1].update(kinematics.motor_speed(1));
-    if (last_motor_speed[0] != out_motor_speed[0] || last_motor_speed[1] != out_motor_speed[1])
-    {
-        last_motor_speed[0] = out_motor_speed[0];
-        last_motor_speed[1] = out_motor_speed[1];
-        Serial.printf("motor_speed0: %f, motor_speed1: %f\n", out_motor_speed[0], out_motor_speed[1]);
-    }
+    // if (last_motor_speed[0] != out_motor_speed[0] || last_motor_speed[1] != out_motor_speed[1])
+    // {
+    //     last_motor_speed[0] = out_motor_speed[0];
+    //     last_motor_speed[1] = out_motor_speed[1];
+    //     Serial.printf("motor_speed0: %f, motor_speed1: %f\n", out_motor_speed[0], out_motor_speed[1]);
+    // }
     motor.updateMotorSpeed(0, out_motor_speed[0]);
     motor.updateMotorSpeed(1, out_motor_speed[1]);
+
+    unsigned long currentMillis = millis(); // 获取当前时间
+    if (currentMillis - previousMillis >= interval)
+    {                                   // 判断是否到达间隔时间
+        previousMillis = currentMillis; // 记录上一次打印的时间
+        float linear_speed, angle_speed;
+        kinematics.kinematic_forward(kinematics.motor_speed(0), kinematics.motor_speed(1), linear_speed, angle_speed);
+        Serial.printf("[%ld] linear:%f angle:%f\n", currentMillis, linear_speed, angle_speed);                                      // 打印当前时间
+        Serial.printf("[%ld] x:%f y:%f yaml:%f\n", currentMillis, kinematics.odom().x, kinematics.odom().y, kinematics.odom().yaw); // 打印当前时间
+    }
     // 延迟10毫秒
     delay(10);
 }

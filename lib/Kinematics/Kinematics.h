@@ -32,14 +32,32 @@ typedef struct
 } motor_param_t;
 
 
+/**
+ * @brief 里程计相关信息，根据轮子速度信息和运动模型推算而来
+ *
+ */
+typedef struct
+{
+    float x;                 // 坐标x
+    float y;                 // 坐标y
+    float yaw;               // yaw
+    float linear_speed;      // 线速度
+    float angular_speed;     // 角速度
+} odom_t;
+
+
+
 class Kinematics
 {
 private:
     motor_param_t motor_param_[2];
     float wheel_distance_; // 轮子间距
+    odom_t odom_;          // 里程计数据
 public:
     Kinematics(/* args */) = default;
     ~Kinematics() = default;
+
+    static void TransAngleInPI(float angle,float& out_angle);
 
     /**
      * @brief 设置电机相关参数
@@ -94,6 +112,21 @@ public:
      * @return float
      */
     float motor_speed(uint8_t id);
+
+    /**
+     * @brief 更新机器人里程计信息
+     *
+     * @param dt 间隔时间dt
+     */
+    void update_bot_odom(uint32_t dt);
+
+    /**
+     * @brief 获取里程计函数
+     *
+     * @return odom_t&
+     */
+    odom_t &odom();
+
 };
 
 #endif // __KINEMATICS_H__

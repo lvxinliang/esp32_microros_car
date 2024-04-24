@@ -30,6 +30,9 @@ void Kinematics::update_motor_ticks(uint64_t current_time, int32_t motor_tick1, 
     motor_param_[1].last_encoder_tick = motor_tick2;   // 更新电机2上一次的脉冲计数
     motor_param_[0].last_update_time = current_time;   // 更新电机1上一次更新时间
     motor_param_[1].last_update_time = current_time;   // 更新电机2上一次更新时间
+
+    // 更新机器人里程计
+    this->update_bot_odom(dt);
 }
 
 void Kinematics::kinematic_inverse(float linear_speed, float angular_speed, float &out_wheel1_speed, float &out_wheel2_speed)
@@ -52,4 +55,40 @@ void Kinematics::kinematic_forward(float wheel1_speed, float wheel2_speed, float
 float Kinematics::motor_speed(uint8_t id)
 {
     return motor_param_[id].motor_speed; // 返回指定id的轮子速度
+}
+void Kinematics::update_bot_odom(uint32_t dt)
+{
+    static float linear_speed, angular_speed;
+    float dt_s = (float)(dt / 1000) / 1000;
+
+    this->kinematic_forward(motor_param_[0].motor_speed, motor_param_[1].motor_speed, linear_speed, angular_speed);
+
+    odom_.angular_speed = angular_speed;
+    odom_.linear_speed = linear_speed / 1000; // /1000（mm/s 转 m/s）
+
+    odom_.yaw += odom_.angular_speed * dt_s;
+
+    Kinematics::TransAngleInPI(odom_.yaw, odom_.yaw);
+
+    /*更新x和y轴上移动的距离*/
+    float delta_distance = odom_.linear_speed * dt_s; // 单位m
+    odom_.x += delta_distance * std::cos(odom_.yaw);
+    odom_.y += delta_distance * std::sin(odom_.yaw);
+}
+
+void Kinematics::TransAngleInPI(float angle, float &out_angle)
+{
+    if (angle > PI)
+    {
+        out_angle -= 2 * PI;
+    }
+    else if (angle < -PI)
+    {
+        out_angle += 2 * PI;
+    }
+}
+
+odom_t &Kinematics::odom()
+{
+    return odom_;
 }
