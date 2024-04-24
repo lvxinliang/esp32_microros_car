@@ -23,15 +23,18 @@ float out_motor_speed[2];        // 创建一个长度为 2 的浮点数数组�
 PidController pid_controller[2]; // 创建PidController的两个对象
 Kinematics kinematics;           // 运动学相关对象
 
+float last_motor_speed[2] = {0, 0};// 方便调试，保存上一次的电机速度
+
 void twist_callback(const void *msg_in)
 {
     const geometry_msgs__msg__Twist *twist_msg = (const geometry_msgs__msg__Twist *)msg_in;
-    static float target_motor_speed1, target_motor_speed2;
+    static float target_motor_speed0, target_motor_speed1;
     float linear_x = twist_msg->linear.x;   // 获取 Twist 消息的线性 x 分量
     float angular_z = twist_msg->angular.z; // 获取 Twist 消息的角度 z 分量
-    kinematics.kinematic_inverse(linear_x * 1000, angular_z, target_motor_speed1, target_motor_speed2);
-    pid_controller[0].update_target(target_motor_speed1);
-    pid_controller[1].update_target(target_motor_speed2);
+    kinematics.kinematic_inverse(linear_x * 1000, angular_z, target_motor_speed0, target_motor_speed1);
+    pid_controller[0].update_target(target_motor_speed0);
+    pid_controller[1].update_target(target_motor_speed1);
+    Serial.printf("target_motor_speed0: %f, target_motor_speed1: %f\n", target_motor_speed0, target_motor_speed1);
 }
 
 // 这个函数是一个后台任务，负责设置和处理与 micro-ROS 代理的通信。
@@ -42,7 +45,7 @@ void microros_task(void *param)
     agent_ip.fromString("192.168.1.30");
 
     // 使用 WiFi 网络和代理 IP 设置 micro-ROS 传输层。
-    set_microros_wifi_transports("00V4", "z12345678", agent_ip, 8888);
+    set_microros_wifi_transports((char *)"00V4", (char *)"z12345678", agent_ip, 8888);
 
     // 等待 2 秒，以便网络连接得到建立。
     delay(2000);
@@ -83,8 +86,8 @@ void setup()
     pid_controller[0].update_pid(0.825, 0.125, 0.0);
     pid_controller[1].update_pid(0.825, 0.125, 0.0);
     // 初始化PID控制器的最大输入输出，MPCNT大小范围在正负100之间
-    pid_controller[0].out_limit(-200, 200);
-    pid_controller[1].out_limit(-200, 200);
+    pid_controller[0].out_limit(-100, 100);
+    pid_controller[1].out_limit(-100, 100);
 
     // 设置运动学参数
     kinematics.set_motor_param(0, 30, 52, 65); // 15606/10/30 = 52
@@ -102,6 +105,12 @@ void loop()
     kinematics.update_motor_ticks(micros(), encoders[0].getTicks(), encoders[1].getTicks());
     out_motor_speed[0] = pid_controller[0].update(kinematics.motor_speed(0));
     out_motor_speed[1] = pid_controller[1].update(kinematics.motor_speed(1));
+    if (last_motor_speed[0] != out_motor_speed[0] || last_motor_speed[1] != out_motor_speed[1])
+    {
+        last_motor_speed[0] = out_motor_speed[0];
+        last_motor_speed[1] = out_motor_speed[1];
+        Serial.printf("motor_speed0: %f, motor_speed1: %f\n", out_motor_speed[0], out_motor_speed[1]);
+    }
     motor.updateMotorSpeed(0, out_motor_speed[0]);
     motor.updateMotorSpeed(1, out_motor_speed[1]);
     // 延迟10毫秒
