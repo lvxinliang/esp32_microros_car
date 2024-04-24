@@ -9,6 +9,10 @@
 #include <Esp32McpwmMotor.h>         // 包含使用 ESP32 的 MCPWM 硬件模块控制 DC 电机的 ESP32 MCPWM 电机库
 #include <PidController.h>           // 包含 PID 控制器库，用于实现 PID 控制
 #include <Kinematics.h>              // 运动学相关实现
+#include <nav_msgs/msg/odometry.h>
+#include <micro_ros_utilities/string_utilities.h>
+rcl_publisher_t odom_publisher;   // 用于发布机器人的里程计信息（Odom）
+nav_msgs__msg__Odometry odom_msg; // 机器人的里程计信息
 
 Esp32PcntEncoder encoders[2];      // 创建一个长度为 2 的 ESP32 PCNT 编码器数组
 rclc_executor_t executor;          // 创建一个 RCLC 执行程序对象，用于处理订阅和发布
@@ -42,6 +46,10 @@ void twist_callback(const void *msg_in)
 // 这个函数是一个后台任务，负责设置和处理与 micro-ROS 代理的通信。
 void microros_task(void *param)
 {
+    // 使用 micro_ros_string_utilities_set 函数设置到 odom_msg.header.frame_id 中
+    odom_msg.header.frame_id = micro_ros_string_utilities_set(odom_msg.header.frame_id, "odom");
+    odom_msg.child_frame_id = micro_ros_string_utilities_set(odom_msg.child_frame_id, "base_link");
+
     // 设置 micro-ROS 代理的 IP 地址。
     IPAddress agent_ip;
     agent_ip.fromString("192.168.1.30");
@@ -61,7 +69,11 @@ void microros_task(void *param)
         &node,
         ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist),
         "/cmd_vel");
-
+    rclc_publisher_init_best_effort(
+        &odom_publisher,
+        &node,
+        ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry),
+        "odom");
     // 设置 micro-ROS 执行器，并将订阅添加到其中。
     rclc_executor_init(&executor, &support.context, 1, &allocator);
     rclc_executor_add_subscription(&executor, &subscriber, &sub_msg, &twist_callback, ON_NEW_DATA);
@@ -69,6 +81,12 @@ void microros_task(void *param)
     // 循环运行 micro-ROS 执行器以处理传入的消息。
     while (true)
     {
+        if (!rmw_uros_epoch_synchronized())
+        {
+            rmw_uros_sync_session(1000);
+            // 如果时间同步成功，则将当前时间设置为MicroROS代理的时间，并输出调试信息。
+            delay(10);
+        }
         delay(100);
         rclc_executor_spin_some(&executor, RCL_MS_TO_NS(100));
     }
@@ -122,8 +140,27 @@ void loop()
         previousMillis = currentMillis; // 记录上一次打印的时间
         float linear_speed, angle_speed;
         kinematics.kinematic_forward(kinematics.motor_speed(0), kinematics.motor_speed(1), linear_speed, angle_speed);
-        Serial.printf("[%ld] linear:%f angle:%f\n", currentMillis, linear_speed, angle_speed);                                      // 打印当前时间
-        Serial.printf("[%ld] x:%f y:%f yaml:%f\n", currentMillis, kinematics.odom().x, kinematics.odom().y, kinematics.odom().yaw); // 打印当前时间
+        // Serial.printf("[%ld] linear:%f angle:%f\n", currentMillis, linear_speed, angle_speed);                                      // 打印当前时间
+        // Serial.printf("[%ld] x:%f y:%f yaml:%f\n", currentMillis, kinematics.odom().x, kinematics.odom().y, kinematics.odom().yaw); // 打印当前时间
+        int64_t stamp = rmw_uros_epoch_millis();
+        // 获取机器人的位置和速度信息，并将其存储在一个ROS消息（odom_msg）中
+        odom_t odom = kinematics.odom();
+        odom_msg.header.stamp.sec = static_cast<int32_t>(stamp / 1000); // 秒部分
+        odom_msg.header.stamp.nanosec = static_cast<uint32_t>((stamp % 1000) * 1e6); // 纳秒部分
+        odom_msg.pose.pose.position.x = odom.x;
+        odom_msg.pose.pose.position.y = odom.y;
+        odom_msg.pose.pose.orientation.w = odom.quaternion.w;
+        odom_msg.pose.pose.orientation.x = odom.quaternion.x;
+        odom_msg.pose.pose.orientation.y = odom.quaternion.y;
+        odom_msg.pose.pose.orientation.z = odom.quaternion.z;
+
+        odom_msg.twist.twist.angular.z = odom.angular_speed;
+        odom_msg.twist.twist.linear.x = odom.linear_speed;
+
+        rcl_ret_t ret = rcl_publish(&odom_publisher, &odom_msg, NULL);
+        if (ret != RCL_RET_OK) {
+            Serial.printf("Failed to publish odom message: %d\n", ret);
+        }
     }
     // 延迟10毫秒
     delay(10);

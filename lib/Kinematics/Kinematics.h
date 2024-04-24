@@ -31,6 +31,13 @@ typedef struct
     uint64_t last_update_time; // 无需配置，上次更新数据的时间，单位us
 } motor_param_t;
 
+typedef struct
+{
+    float w;
+    float x;
+    float y;
+    float z;
+} quaternion_t;
 
 /**
  * @brief 里程计相关信息，根据轮子速度信息和运动模型推算而来
@@ -41,6 +48,7 @@ typedef struct
     float x;                 // 坐标x
     float y;                 // 坐标y
     float yaw;               // yaw
+    quaternion_t quaternion; // 姿态四元数
     float linear_speed;      // 线速度
     float angular_speed;     // 角速度
 } odom_t;
@@ -56,6 +64,15 @@ private:
 public:
     Kinematics(/* args */) = default;
     ~Kinematics() = default;
+    /**
+     * @brief 欧拉角转四元数
+     *
+     * @param roll
+     * @param pitch
+     * @param yaw
+     * @param q
+     */
+    static void Euler2Quaternion(float roll, float pitch, float yaw, quaternion_t &q);
 
     static void TransAngleInPI(float angle,float& out_angle);
 

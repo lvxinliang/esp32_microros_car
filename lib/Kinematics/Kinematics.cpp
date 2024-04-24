@@ -1,5 +1,22 @@
 #include "Kinematics.h"
 
+void Kinematics::Euler2Quaternion(float roll, float pitch, float yaw, quaternion_t &q)
+{
+    // 传入机器人的欧拉角 roll、pitch 和 yaw。
+    // 计算欧拉角的 sin 和 cos 值，分别保存在 cr、sr、cy、sy、cp、sp 六个变量中
+    // https://blog.csdn.net/xiaoma_bk/article/details/79082629
+    double cr = cos(roll * 0.5);
+    double sr = sin(roll * 0.5);
+    double cy = cos(yaw * 0.5);
+    double sy = sin(yaw * 0.5);
+    double cp = cos(pitch * 0.5);
+    double sp = sin(pitch * 0.5);
+    // 计算出四元数的四个分量 q.w、q.x、q.y、q.z
+    q.w = cy * cp * cr + sy * sp * sr;
+    q.x = cy * cp * sr - sy * sp * cr;
+    q.y = sy * cp * sr + cy * sp * cr;
+    q.z = sy * cp * cr - cy * sp * sr;
+}
 void Kinematics::set_motor_param(uint8_t id, uint16_t reducation_ratio, uint16_t pulse_ration, float wheel_diameter)
 {
     motor_param_[id].id = id;   // 设置电机ID
@@ -90,5 +107,7 @@ void Kinematics::TransAngleInPI(float angle, float &out_angle)
 
 odom_t &Kinematics::odom()
 {
+    // 调用 Euler2Quaternion 函数，将机器人的欧拉角 yaw 转换为四元数 quaternion。
+    Kinematics::Euler2Quaternion(0, 0, odom_.yaw, odom_.quaternion);
     return odom_;
 }
