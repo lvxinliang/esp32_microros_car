@@ -25,6 +25,9 @@ Esp32McpwmMotor motor;             // 创建一个 ESP32 MCPWM 电机对象，�
 
 float out_motor_speed[2];        // 创建一个长度为 2 的浮点数数组，用于保存输出电机速度
 PidController pid_controller[2]; // 创建PidController的两个对象
+static float target_motor_speed0, target_motor_speed1; // 两个轮子的目标速度
+float pid_p[2] = {0.625, 0.625}, pid_i[2] = {0.1, 0.1}, pid_d[2] = {1.25, 1.25};  // PID控制器的参数
+
 Kinematics kinematics;           // 运动学相关对象
 
 float last_motor_speed[2] = {0, 0};// 方便调试，保存上一次的电机速度
@@ -34,13 +37,11 @@ const long interval = 1000;        // 打印间隔时间
 void twist_callback(const void *msg_in)
 {
     const geometry_msgs__msg__Twist *twist_msg = (const geometry_msgs__msg__Twist *)msg_in;
-    static float target_motor_speed0, target_motor_speed1;
     float linear_x = twist_msg->linear.x;   // 获取 Twist 消息的线性 x 分量
     float angular_z = twist_msg->angular.z; // 获取 Twist 消息的角度 z 分量
     kinematics.kinematic_inverse(linear_x * 1000, angular_z, target_motor_speed0, target_motor_speed1);
     pid_controller[0].update_target(target_motor_speed0);
     pid_controller[1].update_target(target_motor_speed1);
-    Serial.printf("target_motor_speed0: %f, target_motor_speed1: %f\n", target_motor_speed0, target_motor_speed1);
 }
 
 // 这个函数是一个后台任务，负责设置和处理与 micro-ROS 代理的通信。
@@ -103,11 +104,11 @@ void setup()
     encoders[0].init(0, 32, 33);
     encoders[1].init(1, 26, 25);
     // 初始化PID控制器的kp、ki和kd
-    pid_controller[0].update_pid(0.825, 0.125, 0.0);
-    pid_controller[1].update_pid(0.825, 0.125, 0.0);
+    pid_controller[0].update_pid(pid_p[0], pid_i[0], pid_d[0]);
+    pid_controller[1].update_pid(pid_p[1], pid_i[1], pid_d[1]);
     // 初始化PID控制器的最大输入输出，MPCNT大小范围在正负100之间
-    pid_controller[0].out_limit(-100, 100);
-    pid_controller[1].out_limit(-100, 100);
+    pid_controller[0].out_limit(-500, 500);
+    pid_controller[1].out_limit(-500, 500);
 
     // 设置运动学参数
     kinematics.set_motor_param(0, 30, 52, 65); // 15606/10/30 = 52
@@ -122,17 +123,21 @@ void loop()
 {
     static float out_motor_speed[2];
     static uint64_t last_update_info_time = millis();
+    static float filtered_motor_speed[2] = {0.0, 0.0};
+    float alpha = 0.4; // 调整这个值以改变滤波器的强度，范围是0-1
+
     kinematics.update_motor_ticks(micros(), encoders[0].getTicks(), encoders[1].getTicks());
     out_motor_speed[0] = pid_controller[0].update(kinematics.motor_speed(0));
     out_motor_speed[1] = pid_controller[1].update(kinematics.motor_speed(1));
-    // if (last_motor_speed[0] != out_motor_speed[0] || last_motor_speed[1] != out_motor_speed[1])
-    // {
-    //     last_motor_speed[0] = out_motor_speed[0];
-    //     last_motor_speed[1] = out_motor_speed[1];
-    //     Serial.printf("motor_speed0: %f, motor_speed1: %f\n", out_motor_speed[0], out_motor_speed[1]);
-    // }
-    motor.updateMotorSpeed(0, out_motor_speed[0]);
-    motor.updateMotorSpeed(1, out_motor_speed[1]);
+
+    // 一阶滤波器
+    filtered_motor_speed[0] = alpha * out_motor_speed[0] + (1 - alpha) * filtered_motor_speed[0];
+    filtered_motor_speed[1] = alpha * out_motor_speed[1] + (1 - alpha) * filtered_motor_speed[1];
+
+    // 使用滤波后的速度更新电机
+    motor.updateMotorSpeed(0, filtered_motor_speed[0]);
+    motor.updateMotorSpeed(1, filtered_motor_speed[1]);
+    Serial.printf("data: %f,%f,%f,%f\n", target_motor_speed0, kinematics.motor_speed(0), target_motor_speed1, kinematics.motor_speed(1));
 
     unsigned long currentMillis = millis(); // 获取当前时间
     if (currentMillis - previousMillis >= interval)

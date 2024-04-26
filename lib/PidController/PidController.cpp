@@ -11,8 +11,12 @@ float PidController::update(float control)
 {
     // 计算误差及其变化率
     float error = target_ - control; // 计算误差
-    derror_ = error_last_ - error;   // 计算误差变化率
+    derror_ =  error - error_last_;   // 计算误差变化率
     error_last_ = error;
+
+    // 当前速度和目标输出不一致时清空累计误差
+    if (control * target_ < 0)
+        error_sum_ = 0; // 误差累计清零
 
     // 计算积分项并进行积分限制
     error_sum_ += error;
