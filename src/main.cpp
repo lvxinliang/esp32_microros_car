@@ -31,16 +31,18 @@ float last_motor_speed[2] = {0, 0};// 方便调试，保存上一次的电机速
 unsigned long previousMillis = 0;  // 保存上一次打印的时间
 const long interval = 1000;        // 打印间隔时间
 
+static float target_motor_speed0, target_motor_speed1;
+float pid_p[2] = {0.625, 0.625}, pid_i[2] = {0.1, 0.1}, pid_d[2] = {0.0, 0.0};
+
 void twist_callback(const void *msg_in)
 {
     const geometry_msgs__msg__Twist *twist_msg = (const geometry_msgs__msg__Twist *)msg_in;
-    static float target_motor_speed0, target_motor_speed1;
     float linear_x = twist_msg->linear.x;   // 获取 Twist 消息的线性 x 分量
     float angular_z = twist_msg->angular.z; // 获取 Twist 消息的角度 z 分量
     kinematics.kinematic_inverse(linear_x * 1000, angular_z, target_motor_speed0, target_motor_speed1);
     pid_controller[0].update_target(target_motor_speed0);
     pid_controller[1].update_target(target_motor_speed1);
-    Serial.printf("target_motor_speed0: %f, target_motor_speed1: %f\n", target_motor_speed0, target_motor_speed1);
+    // Serial.printf("target_motor_speed0: %f, target_motor_speed1: %f\n", target_motor_speed0, target_motor_speed1);
 }
 
 // 这个函数是一个后台任务，负责设置和处理与 micro-ROS 代理的通信。
@@ -103,11 +105,11 @@ void setup()
     encoders[0].init(0, 32, 33);
     encoders[1].init(1, 26, 25);
     // 初始化PID控制器的kp、ki和kd
-    pid_controller[0].update_pid(0.825, 0.125, 0.0);
-    pid_controller[1].update_pid(0.825, 0.125, 0.0);
+    pid_controller[0].update_pid(pid_p[0], pid_i[0], pid_d[0]);
+    pid_controller[1].update_pid(pid_p[1], pid_i[1], pid_d[1]);
     // 初始化PID控制器的最大输入输出，MPCNT大小范围在正负100之间
-    pid_controller[0].out_limit(-100, 100);
-    pid_controller[1].out_limit(-100, 100);
+    pid_controller[0].out_limit(-500, 500);
+    pid_controller[1].out_limit(-500, 500);
 
     // 设置运动学参数
     kinematics.set_motor_param(0, 30, 52, 65); // 15606/10/30 = 52
@@ -122,46 +124,63 @@ void loop()
 {
     static float out_motor_speed[2];
     static uint64_t last_update_info_time = millis();
+    static float filtered_motor_speed[2] = {0.0, 0.0};
+    float alpha = 0.4; // 调整这个值以改变滤波器的强度，范围是0-1
+
     kinematics.update_motor_ticks(micros(), encoders[0].getTicks(), encoders[1].getTicks());
     out_motor_speed[0] = pid_controller[0].update(kinematics.motor_speed(0));
     out_motor_speed[1] = pid_controller[1].update(kinematics.motor_speed(1));
-    // if (last_motor_speed[0] != out_motor_speed[0] || last_motor_speed[1] != out_motor_speed[1])
-    // {
-    //     last_motor_speed[0] = out_motor_speed[0];
-    //     last_motor_speed[1] = out_motor_speed[1];
-    //     Serial.printf("motor_speed0: %f, motor_speed1: %f\n", out_motor_speed[0], out_motor_speed[1]);
-    // }
-    motor.updateMotorSpeed(0, out_motor_speed[0]);
-    motor.updateMotorSpeed(1, out_motor_speed[1]);
 
-    unsigned long currentMillis = millis(); // 获取当前时间
-    if (currentMillis - previousMillis >= interval)
-    {                                   // 判断是否到达间隔时间
-        previousMillis = currentMillis; // 记录上一次打印的时间
-        float linear_speed, angle_speed;
-        kinematics.kinematic_forward(kinematics.motor_speed(0), kinematics.motor_speed(1), linear_speed, angle_speed);
-        // Serial.printf("[%ld] linear:%f angle:%f\n", currentMillis, linear_speed, angle_speed);                                      // 打印当前时间
-        // Serial.printf("[%ld] x:%f y:%f yaml:%f\n", currentMillis, kinematics.odom().x, kinematics.odom().y, kinematics.odom().yaw); // 打印当前时间
-        int64_t stamp = rmw_uros_epoch_millis();
-        // 获取机器人的位置和速度信息，并将其存储在一个ROS消息（odom_msg）中
-        odom_t odom = kinematics.odom();
-        odom_msg.header.stamp.sec = static_cast<int32_t>(stamp / 1000); // 秒部分
-        odom_msg.header.stamp.nanosec = static_cast<uint32_t>((stamp % 1000) * 1e6); // 纳秒部分
-        odom_msg.pose.pose.position.x = odom.x;
-        odom_msg.pose.pose.position.y = odom.y;
-        odom_msg.pose.pose.orientation.w = odom.quaternion.w;
-        odom_msg.pose.pose.orientation.x = odom.quaternion.x;
-        odom_msg.pose.pose.orientation.y = odom.quaternion.y;
-        odom_msg.pose.pose.orientation.z = odom.quaternion.z;
+    // 一阶滤波器
+    filtered_motor_speed[0] = alpha * out_motor_speed[0] + (1 - alpha) * filtered_motor_speed[0];
+    filtered_motor_speed[1] = alpha * out_motor_speed[1] + (1 - alpha) * filtered_motor_speed[1];
 
-        odom_msg.twist.twist.angular.z = odom.angular_speed;
-        odom_msg.twist.twist.linear.x = odom.linear_speed;
+    // 使用滤波后的速度更新电机
+    motor.updateMotorSpeed(0, filtered_motor_speed[0]);
+    motor.updateMotorSpeed(1, filtered_motor_speed[1]);
+    Serial.printf("data: %f,%f,%f\n", target_motor_speed0, kinematics.motor_speed(0), pid_controller[0].error_sum_);
+    // Serial.printf("data: %f,%f,%f,%f\n", target_motor_speed0, kinematics.motor_speed(0), target_motor_speed1, kinematics.motor_speed(1));
+    if (Serial.available()) {
+        String input = Serial.readStringUntil('\n');
+        sscanf(input.c_str(), "%f,%f,%f", &pid_p[0], &pid_i[0], &pid_d[0]);
+        pid_p[1] = pid_p[0], pid_i[1] = pid_i[0], pid_d[1] = pid_d[0];
+        pid_controller[0].update_pid(pid_p[0], pid_i[0], pid_d[0]);
+        pid_controller[1].update_pid(pid_p[1], pid_i[1], pid_d[1]);
 
-        rcl_ret_t ret = rcl_publish(&odom_publisher, &odom_msg, NULL);
-        if (ret != RCL_RET_OK) {
-            Serial.printf("Failed to publish odom message: %d\n", ret);
-        }
+        pid_controller[0].out_limit(-500, 500);
+        pid_controller[1].out_limit(-500, 500);
+        Serial.printf("pid_p: %f, pid_i: %f, pid_d: %f\n", pid_p, pid_i, pid_d);
     }
+
+
+    // unsigned long currentMillis = millis(); // 获取当前时间
+    // if (currentMillis - previousMillis >= interval)
+    // {                                   // 判断是否到达间隔时间
+    //     previousMillis = currentMillis; // 记录上一次打印的时间
+    //     float linear_speed, angle_speed;
+    //     kinematics.kinematic_forward(kinematics.motor_speed(0), kinematics.motor_speed(1), linear_speed, angle_speed);
+    //     // Serial.printf("[%ld] linear:%f angle:%f\n", currentMillis, linear_speed, angle_speed);                                      // 打印当前时间
+    //     // Serial.printf("[%ld] x:%f y:%f yaml:%f\n", currentMillis, kinematics.odom().x, kinematics.odom().y, kinematics.odom().yaw); // 打印当前时间
+    //     int64_t stamp = rmw_uros_epoch_millis();
+    //     // 获取机器人的位置和速度信息，并将其存储在一个ROS消息（odom_msg）中
+    //     odom_t odom = kinematics.odom();
+    //     odom_msg.header.stamp.sec = static_cast<int32_t>(stamp / 1000); // 秒部分
+    //     odom_msg.header.stamp.nanosec = static_cast<uint32_t>((stamp % 1000) * 1e6); // 纳秒部分
+    //     odom_msg.pose.pose.position.x = odom.x;
+    //     odom_msg.pose.pose.position.y = odom.y;
+    //     odom_msg.pose.pose.orientation.w = odom.quaternion.w;
+    //     odom_msg.pose.pose.orientation.x = odom.quaternion.x;
+    //     odom_msg.pose.pose.orientation.y = odom.quaternion.y;
+    //     odom_msg.pose.pose.orientation.z = odom.quaternion.z;
+
+    //     odom_msg.twist.twist.angular.z = odom.angular_speed;
+    //     odom_msg.twist.twist.linear.x = odom.linear_speed;
+
+    //     rcl_ret_t ret = rcl_publish(&odom_publisher, &odom_msg, NULL);
+    //     if (ret != RCL_RET_OK) {
+    //         Serial.printf("Failed to publish odom message: %d\n", ret);
+    //     }
+    // }
     // 延迟10毫秒
     delay(10);
 }

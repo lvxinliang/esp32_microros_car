@@ -20,7 +20,7 @@ public:
     float derror_;              // 误差变化率
     float error_pre_;           // 上上次误差
     float error_last_;          // 上一次误差
-    float intergral_up_ = 2500; // 积分上限
+    float intergral_up_ = 550; // 积分上限
 
 public:
     float update(float control);                   // 更新输出值
