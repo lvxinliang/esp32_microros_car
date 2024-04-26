@@ -32,7 +32,7 @@ unsigned long previousMillis = 0;  // 保存上一次打印的时间
 const long interval = 1000;        // 打印间隔时间
 
 static float target_motor_speed0, target_motor_speed1;
-float pid_p[2] = {0.625, 0.625}, pid_i[2] = {0.1, 0.1}, pid_d[2] = {0.0, 0.0};
+float pid_p[2] = {0.625, 0.625}, pid_i[2] = {0.1, 0.1}, pid_d[2] = {1.25, 1.25};
 
 void twist_callback(const void *msg_in)
 {
