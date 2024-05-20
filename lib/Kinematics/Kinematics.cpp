@@ -66,7 +66,7 @@ void Kinematics::kinematic_forward(float wheel1_speed, float wheel2_speed, float
 {
     wheel1_speed = -wheel1_speed;
     linear_speed = (wheel1_speed + wheel2_speed) / 2.0;                // 计算线速度
-    angular_speed = (wheel2_speed - wheel1_speed) / wheel_distance_;   // 计算角速度
+    angular_speed = (wheel1_speed - wheel2_speed) / wheel_distance_;   // 计算角速度
 }
 
 float Kinematics::motor_speed(uint8_t id)
